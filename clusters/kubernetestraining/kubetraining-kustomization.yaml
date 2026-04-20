@@ -4,7 +4,7 @@ metadata:
   name: kubetraining
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15m
   path: ./kubetraining
   prune: true
   sourceRef:
