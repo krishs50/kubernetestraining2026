@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: taxnamespace
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-rs
+  namespace: taxnamespace
+  labels:
+    app: nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Required by AKS anti-affinity safeguard
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - nginx
+              topologyKey: kubernetes.io/hostname
+
+      # Allows scheduling even if nodes have CriticalAddonsOnly taint
+      # Remove this if you plan to use a User Nodepool instead.
+      tolerations:
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
+          effect: "NoSchedule"
+
+      containers:
+        - name: nginx
+          image: nginx:1.25
+
+          # Required by AKS safeguard: resource requests
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+
+          ports:
+            - containerPort: 80
+
+          # Required by AKS safeguard: readinessProbe
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 5
+
+          # Required by AKS safeguard: livenessProbe
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  namespace: taxnamespace
+spec:
+  selector:
+    app: nginx
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: NodePort
+
+
+---
+# ------------------------------------------------
+# Ingress (uses existing nginx‑ingress controller)
+# ------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx-ingress
+  namespace: taxnamespace
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /test2
+            pathType: Prefix
+            backend:
+              service:
+                name: nginx-svc
+                port:
+                  number: 80

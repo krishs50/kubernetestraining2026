@@ -1,0 +1,121 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rbac-test
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo-sa
+  namespace: rbac-test
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: demo-role
+  namespace: rbac-test
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "configmaps"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: demo-rolebinding
+  namespace: rbac-test
+subjects:
+  - kind: ServiceAccount
+    name: demo-sa
+    namespace: rbac-test
+roleRef:
+  kind: Role
+  name: demo-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rbac-test-deploy
+  namespace: rbac-test
+  labels:
+    app: rbac-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rbac-test
+  template:
+    metadata:
+      labels:
+        app: rbac-test
+    spec:
+      serviceAccountName: demo-sa
+
+      #  Required by AKS safeguards
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+
+      #  Required to schedule on your tainted system nodes
+      tolerations:
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
+          effect: "NoSchedule"
+
+      #  Required by AKS multi-replica safeguards
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 1
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - rbac-test
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: toolbox
+          image: bitnami/kubectl:1.29.0
+
+          command: ["/bin/sh", "-c"]
+          args:
+            - echo "RBAC Test Pod running. Exec into me to test permissions."; sleep 3600
+
+          #  Required by AKS safeguard
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
+
+          #  Required probes
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "echo ready"]
+            initialDelaySeconds: 2
+            periodSeconds: 5
+
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "echo alive"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rbac-test-svc
+  namespace: rbac-test
+spec:
+  selector:
+    app: rbac-test
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP

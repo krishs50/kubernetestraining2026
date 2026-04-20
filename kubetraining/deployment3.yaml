@@ -1,0 +1,169 @@
+# ------------------------------------------------
+# Namespace
+# ------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-training
+---
+# ------------------------------------------------
+# httpbin Deployment
+# ------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpbin
+  namespace: ingress-training
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: httpbin
+  template:
+    metadata:
+      labels:
+        app: httpbin
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: httpbin
+          image: kennethreitz/httpbin:0.10.2
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /get
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /status/200
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+# ------------------------------------------------
+# httpbin Service
+# ------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpbin
+  namespace: ingress-training
+spec:
+  selector:
+    app: httpbin
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
+---
+# ------------------------------------------------
+# whoami Deployment (with anti‑affinity)
+# ------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whoami
+  namespace: ingress-training
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: whoami
+  template:
+    metadata:
+      labels:
+        app: whoami
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - whoami
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.10.4
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+# ------------------------------------------------
+# whoami Service
+# ------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami
+  namespace: ingress-training
+spec:
+  selector:
+    app: whoami
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
+---
+# ------------------------------------------------
+# Ingress (Path‑based routing)
+# ------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: training-ingress
+  namespace: ingress-training
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: httpbin
+                port:
+                  number: 80
+          - path: /whoami
+            pathType: Prefix
+            backend:
+              service:
+                name: whoami
+                port:
+                  number: 80
